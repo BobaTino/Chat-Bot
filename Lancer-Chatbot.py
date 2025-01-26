@@ -3,18 +3,19 @@ from nltk.tokenize import word_tokenize
 from nltk.corpus import wordnet
 import docx
 from transformers import pipeline
+from collections import defaultdict
 import spacy
-import tensorflow as tf
 
 # Download necessary NLTK data
 nltk.download('punkt')
 nltk.download('wordnet')
 
-# Load spaCy model for NER
-nlp = spacy.load("en_core_web_sm")
+# Lazy load heavy models
+def get_spacy_model():
+    return spacy.load("en_core_web_sm")
 
-# Load a pre-trained sentence embedding model from transformers
-semantic_similarity_model = pipeline("feature-extraction", model="sentence-transformers/all-MiniLM-L6-v2")
+def get_semantic_similarity_model():
+    return pipeline("feature-extraction", model="sentence-transformers/all-MiniLM-L6-v2")
 
 # Function to extract text from a Word (.docx) file
 def extract_text_from_docx(docx_path):
@@ -28,11 +29,17 @@ def extract_text_from_docx(docx_path):
         print(f"Error reading Word document: {e}")
         return ""
 
-# Tokenize the user input using NLTK
-def tokenize_query(query):
-    return word_tokenize(query.lower())
+# Pre-tokenize and store synonyms for the handbook
+def preprocess_handbook(handbook_text):
+    handbook_words = set(word_tokenize(handbook_text.lower()))
+    synonym_dict = defaultdict(list)
+    
+    for word in handbook_words:
+        synonyms = get_synonyms(word)
+        synonym_dict[word] = synonyms
+    return synonym_dict
 
-# Get synonyms for keywords in the query
+# Get synonyms for a word
 def get_synonyms(word):
     synonyms = set()
     for syn in wordnet.synsets(word):
@@ -40,103 +47,114 @@ def get_synonyms(word):
             synonyms.add(lemma.name())
     return list(synonyms)
 
-# Enhanced NLP: Identify entities and generate embeddings for better matching
-def extract_entities_and_embeddings(query):
-    doc = nlp(query)
-    entities = [ent.text for ent in doc.ents]  # Extract entities
-    embeddings = semantic_similarity_model(query)[0]  # Generate sentence embeddings
-    return entities, embeddings
-    
-# Search function that uses tokens and synonyms
-def search_handbook_with_synonyms(tokens, handbook_text):
+# Tokenize the user query
+def tokenize_query(query):
+    return word_tokenize(query.lower())
+
+# Search function using tokens and synonyms
+def search_with_tokens_and_synonyms(query_tokens, handbook_text, synonym_dict):
     handbook_text_lower = handbook_text.lower()
-    
-    for token in tokens:
-        # Search for the token itself
+
+    for token in query_tokens:
+        # Check for the token itself in the handbook
         if token in handbook_text_lower:
             start_index = handbook_text_lower.find(token)
             snippet = handbook_text[max(0, start_index - 50):start_index + 300]
             return f"Found relevant information: \n...\n{snippet}\n..."
-        
-        # Search for synonyms of the token
-        synonyms = get_synonyms(token)
+
+        # Check for synonyms of the token in the handbook
+        synonyms = synonym_dict.get(token, [])
         for synonym in synonyms:
             if synonym in handbook_text_lower:
                 start_index = handbook_text_lower.find(synonym)
                 snippet = handbook_text[max(0, start_index - 50):start_index + 300]
                 return f"Found relevant information using synonym '{synonym}': \n...\n{snippet}\n..."
-    
+
     return "Sorry, I can't find that information in the handbook."
 
-# Search using semantic similarity and synonyms
-def search_handbook_with_enhanced_nlp(query, handbook_text):
-    # Get entities and embeddings for advanced search
-    entities, query_embedding = extract_entities_and_embeddings(query)
-    
-    # Split the handbook text into paragraphs for better matching
+# Enhanced NLP function as fallback
+def search_with_advanced_nlp(query, handbook_text, semantic_similarity_model):
+    # Lazy load spaCy and transformer models
+    nlp = get_spacy_model()
+    model = semantic_similarity_model
+
+    # Extract entities and embeddings
+    doc = nlp(query)
+    entities = [ent.text for ent in doc.ents]  # Extract entities
+    embeddings = model(query)[0]  # Generate sentence embeddings
+
+    # Split the handbook text into paragraphs
     paragraphs = handbook_text.split("\n")
     best_match = None
     best_score = float("-inf")
-    
+
     # Compute the average embedding for the query
-    query_embedding_mean = [sum(x) / len(x) for x in zip(*query_embedding)]
+    query_embedding_mean = [sum(x) / len(x) for x in zip(*embeddings)]
 
     for paragraph in paragraphs:
-        # Generate paragraph embeddings
-        paragraph_embedding = semantic_similarity_model(paragraph)[0]
-        
+        paragraph_embedding = model(paragraph)[0]
+        paragraph_embedding_mean = [sum(x) / len(x) for x in zip(*paragraph_embedding)]
+
         # Compute cosine similarity
-        score = sum(a * b for a, b in zip(query_embedding_mean, paragraph_embedding[0]))
-        
-        # Update best match if current score is higher
+        score = sum(a * b for a, b in zip(query_embedding_mean, paragraph_embedding_mean))
+
         if score > best_score:
             best_match = paragraph
             best_score = score
-    
-    # Fallback to synonym matching if semantic similarity finds no match
-    if best_score < 0.7:  # Adjustable threshold
-        tokens = tokenize_query(query)
-        best_match = search_handbook_with_synonyms(tokens, handbook_text)  # Existing synonym function
-    
+
     return f"Found relevant information: \n...\n{best_match}\n..." if best_match else "Sorry, no relevant information found."
 
 # Improved context-aware chatbot class
 class ContextAwareChatbot:
-    def __init__(self):
+    def __init__(self, handbook_text):
         self.previous_queries = []
+        self.handbook_text = handbook_text
+        self.synonym_dict = preprocess_handbook(handbook_text)
+        self.semantic_similarity_model = None
 
-    def chatbot(self, handbook_text):
+    def chatbot(self):
         print("Chatbot: How can I assist you? Type 'bye' to exit.")
-        
+
         while True:
             user_input = input("You: ").strip()
-            
+
             if user_input.lower() == "bye":
                 print("Chatbot: Goodbye!")
                 break
-            
-            # Display previous queries for context, if applicable
+
+            # Display previous queries for context
             if self.previous_queries:
                 print(f"Chatbot: Previously you asked about '{self.previous_queries[-1]}'...")
-            
-            # Generate response with enhanced NLP
-            response = search_handbook_with_enhanced_nlp(user_input, handbook_text)
+
+            # Tokenize the query
+            tokens = tokenize_query(user_input)
+
+            # First attempt: Token and synonym search
+            response = search_with_tokens_and_synonyms(tokens, self.handbook_text, self.synonym_dict)
+
+            # If no match, fallback to semantic similarity
+            if "Sorry" in response:
+                print("Chatbot: Let me perform a deeper search...")
+                if not self.semantic_similarity_model:
+                    self.semantic_similarity_model = get_semantic_similarity_model()
+                response = search_with_advanced_nlp(user_input, self.handbook_text, self.semantic_similarity_model)
+
             print(f"Chatbot: {response}")
-            
-            # Store the current query for context
+
+            # Store the query for context
             self.previous_queries.append(user_input)
 
 # Main program execution
 if __name__ == "__main__":
     # Specify the path to the Word (.docx) file
     file_path = "Text\IRB Handbook 3.3_FINAL.docx"
-    
+
     # Extract text from the specified .docx file
     handbook_text = extract_text_from_docx(file_path)
-    
+
     if handbook_text:
         # Initialize the context-aware chatbot and run it
-        bot = ContextAwareChatbot()
-        bot.chatbot(handbook_text)
+        bot = ContextAwareChatbot(handbook_text)
+        bot.chatbot()
     else:
         print("Error: Could not read the handbook.")
