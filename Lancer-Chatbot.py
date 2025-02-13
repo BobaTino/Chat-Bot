@@ -68,13 +68,13 @@ def tokenize_query(query):
     return preprocess_text(query)
 
 # Summarize the given text
-def summarize_text(text, max_length=150):
+def summarize_text(text, max_length=70):
     if len(text.split()) <= 10:  # Skip summarization for very short text
         return text
     
     summarizer = get_summarization_model()
     try:
-        summary = summarizer(text, max_length=max_length, min_length=30, do_sample=False)
+        summary = summarizer(text, max_length=max_length, min_length=35, do_sample=False)
         return summary[0]['summary_text']
     except Exception as e:
         print(f"Summarization failed: {e}")
@@ -97,7 +97,7 @@ def search_with_tokens_and_synonyms(query_tokens, handbook_text, synonym_dict):
         for synonym in synonyms:
             if synonym in handbook_text_lower:
                 start_index = handbook_text_lower.find(synonym)
-                snippet = handbook_text[max(0, start_index - 50):start_index + 300]
+                snippet = handbook_text[max(0, start_index - 200):start_index + 600]
                 summary = summarize_text(snippet)
                 return f"Found relevant information using synonym '{synonym}': \n...\n{summary}\n..."
 
@@ -113,7 +113,7 @@ def cosine_similarity(vec1, vec2):
 # Enhanced NLP function as fallback
 def search_with_advanced_nlp(query, handbook_text, semantic_similarity_model):
     # Split the handbook text into paragraphs
-    paragraphs = [p for p in handbook_text.split("\n") if p.strip()]
+    paragraphs = [p.strip() for p in handbook_text.split("\n\n") if len(p.strip()) > 50]
     
     # Compute query embedding
     query_embedding = np.mean(semantic_similarity_model(query)[0], axis=0)
