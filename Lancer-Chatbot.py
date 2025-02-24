@@ -9,6 +9,7 @@ import spacy
 from functools import lru_cache
 from concurrent.futures import ThreadPoolExecutor
 import numpy as np
+from pymongo import MongoClient
 
 # Download necessary NLTK data
 nltk.download('punkt')
@@ -142,10 +143,14 @@ def search_with_advanced_nlp(query, handbook_text, semantic_similarity_model):
 # Improved context-aware chatbot class
 class ContextAwareChatbot:
     def __init__(self, handbook_text):
-        self.previous_queries = []
         self.handbook_text = handbook_text
         self.synonym_dict = preprocess_handbook(handbook_text)
         self.semantic_similarity_model = get_semantic_similarity_model()
+        
+        # Connect to MongoDB
+        self.client = MongoClient("mongodb+srv://longle_user:longle_password@iq-cluster.dujj4.mongodb.net/?retryWrites=true&w=majority&appName=IQ-Cluster")  # Replace with your MongoDB connection string
+        self.db = self.client["chatbot_query"]  # Replace with your database name
+        self.collection = self.db["test"]  # Replace with your collection name
 
     def chatbot(self):
         print("Chatbot: How can I assist you? Type 'bye' to exit.")
@@ -158,8 +163,11 @@ class ContextAwareChatbot:
                 break
 
             # Display previous queries for context
-            if self.previous_queries:
-                print(f"Chatbot: Previously you asked about '{self.previous_queries[-1]}'...")
+            previous_queries = self.collection.find().sort("_id", -1).limit(5)
+            if previous_queries:
+                print("Chatbot: Previously you asked about:")
+                for query in previous_queries:
+                    print(f"- {query['query']}")
 
             # Tokenize the query
             tokens = tokenize_query(user_input)
@@ -174,8 +182,8 @@ class ContextAwareChatbot:
 
             print(f"Chatbot: {response}")
 
-            # Store the query for context
-            self.previous_queries.append(user_input)
+            # Store the query and response in MongoDB
+            self.collection.insert_one({"query": user_input, "response": response})
 
 # Main program execution
 if __name__ == "__main__":
