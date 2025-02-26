@@ -10,6 +10,7 @@ from functools import lru_cache
 from concurrent.futures import ThreadPoolExecutor
 import numpy as np
 from pymongo import MongoClient
+from datetime import datetime
 
 # Download necessary NLTK data
 nltk.download('punkt')
@@ -184,8 +185,12 @@ class ContextAwareChatbot:
 
             # Store the query and response in MongoDB
             try: 
-                document = {"query": user_input, "response": response}
-                print ("Inserting document:", document)
+                document = {
+                    "query": user_input,
+                    "response": response,
+                    "timestamp": datetime.utcnow()
+                }
+                print("Inserting document: ", document)
                 self.collection.insert_one(document)
                 print("Document inserted successfully.")
             except Exception as e:
