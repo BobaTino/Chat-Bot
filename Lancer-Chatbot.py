@@ -183,7 +183,14 @@ class ContextAwareChatbot:
             print(f"Chatbot: {response}")
 
             # Store the query and response in MongoDB
-            self.collection.insert_one({"query": user_input, "response": response})
+            try: 
+                document = {"query": user_input, "response": response}
+                print ("Inserting document:", document)
+                self.collection.insert_one(document)
+                print("Document inserted successfully.")
+            except Exception as e:
+                print(f"Error inserting document into MongoDB: {e}")
+                
 
 # Main program execution
 if __name__ == "__main__":
